@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>OBJ•SCOPE — OsciStudio XY</title>
+	<style>
+		@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+		:root { --green: #00ff9f; --accent: #00ccff; }
+		
+		body {
+			background: #050505;
+			color: var(--green);
+			font-family: 'VT323', monospace;
+			margin: 0; padding: 0; height: 100vh;
+			display: flex; flex-direction: column; overflow: hidden;
+		}
+		
+		header {
+			background: #111;
+			border-bottom: 6px solid var(--green);
+			padding: 10px 20px;
+			display: flex; justify-content: space-between; align-items: center;
+			flex-wrap: wrap; gap: 12px;
+			box-shadow: 0 0 25px rgba(0,255,159,0.6);
+		}
+		h1 { font-size: 2.6rem; letter-spacing: 6px; text-shadow: 0 0 15px var(--green); margin:0; }
+		
+		.controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+		button, input[type="file"] { 
+			background:#111; color:var(--green); border:2px solid var(--green); 
+			padding:9px 16px; font-family:inherit; cursor:pointer; font-size:1.15rem;
+		}
+		button:hover { background:var(--green); color:#000; }
+		
+		.main { flex:1; display:flex; padding:15px; gap:15px; overflow:hidden; }
+		
+		.scope-container {
+			flex:1; background:#000; border:10px solid #1a1a1a; border-radius:12px;
+			position:relative; box-shadow:0 0 80px rgba(0,255,159,0.7);
+			overflow:hidden;
+		}
+		#oscilloscope { width:100%; height:100%; }
+		
+		.crt { position:absolute; inset:0; pointer-events:none;
+			background: repeating-linear-gradient(transparent 0px, transparent 3px, rgba(0,255,159,0.06) 3px, rgba(0,255,159,0.06) 6px);
+			box-shadow: inset 0 0 140px rgba(0,0,0,0.95);
+		}
+		
+		.sidebar {
+			width: 390px; background:#111; border:5px solid var(--green);
+			padding:18px; display:flex; flex-direction:column; gap:20px; overflow-y:auto;
+		}
+		
+		label { display:block; margin:6px 0 3px; color:#999; }
+		input[type="range"] { width:100%; accent-color:var(--green); }
+		
+		.tab-bar { display:flex; gap:8px; margin-bottom:12px; }
+		.tab {
+			padding:8px 16px; background:#1a1a1a; border:2px solid #333; cursor:pointer;
+		}
+		.tab.active { background:var(--green); color:#000; border-color:var(--green); }
+		
+		.mode-grid {
+			display: grid;
+			grid-template-columns: repeat(2, 1fr);
+			gap: 8px;
+		}
+		.status { color:#ffcc00; font-size:1.3rem; }
+	</style>
+</head>
+<body>
+	<header>
+		<h1>OBJ•SCOPE XY</h1>
+		<div class="controls">
+			<label><input type="file" id="fileInput" accept=".obj" style="display:none"><button onclick="document.getElementById('fileInput').click()">LOAD .OBJ</button></label>
+			<button id="playBtn">▶ PLAY</button>
+			<button id="pauseBtn" style="display:none">⏸ PAUSE</button>
+			<button onclick="resetAll()">RESET</button>
+		</div>
+		<div class="status" id="status">READY — XY MODE ENABLED</div>
+	</header>
+	
+	<div class="main">
+		<div class="scope-container">
+			<canvas id="oscilloscope" width="1400" height="720"></canvas>
+			<div class="crt"></div>
+		</div>
+		
+		<div class="sidebar">
+			<div class="tab-bar">
+				<div class="tab active" onclick="switchTab(0)" id="tab0">TRACE</div>
+				<div class="tab" onclick="switchTab(1)" id="tab1">EFFECTS</div>
+			</div>
+			
+			<!-- TRACE TAB -->
+			<div id="panel0">
+				<h2>TRACE MODE</h2>
+				<div class="mode-grid">
+					<button onclick="setMode(0)" id="m0">Single</button>
+					<button onclick="setMode(1)" id="m1">Dual</button>
+					<button onclick="setMode(2)" id="m2" class="active">Object</button>
+					<button onclick="setMode(3)" id="m3">XY Shape</button>
+				</div>
+				
+				<h2>ROTATION (affects both sound & shape)</h2>
+				<label>X <span id="rxVal">0</span>°</label><input type="range" id="rotX" min="-180" max="180" value="0">
+				<label>Y <span id="ryVal">0</span>°</label><input type="range" id="rotY" min="-180" max="180" value="0">
+				<label>Z <span id="rzVal">0</span>°</label><input type="range" id="rotZ" min="-180" max="180" value="0">
+				
+				<h2>FREQUENCY</h2>
+				<label>Hz: <span id="freqVal">440</span></label>
+				<input type="range" id="freqSlider" min="20" max="2500" value="440" step="1">
+			</div>
+			
+			<!-- EFFECTS TAB -->
+			<div id="panel1" style="display:none">
+				<h2>EFFECTS</h2>
+				<label>Distortion <span id="distVal">0</span>%</label>
+				<input type="range" id="distortion" min="0" max="80" value="0">
+				<label>Noise <span id="noiseVal">0</span>%</label>
+				<input type="range" id="noise" min="0" max="40" value="0">
+				<label>Filter <span id="filterVal">2200</span> Hz</label>
+				<input type="range" id="filter" min="200" max="8000" value="2200" step="50">
+			</div>
+			
+			<div id="waveInfo" style="background:#000;padding:14px;border:2px solid #333;flex:1;font-size:1.05rem;">
+				Load .obj → watch it come alive in XY
+			</div>
+		</div>
+	</div>
+
+	<script>
+		const canvas = document.getElementById('oscilloscope');
+		const ctx = canvas.getContext('2d');
+		
+		let audioContext, gainNode, filterNode, sourceNode, audioBuffer;
+		let isPlaying = false;
+		let animationFrame;
+		
+		let originalVertices = [];
+		let vertices = [];
+		let waveform = [], waveform2 = [], waveformCombined = [];
+		
+		let rotX = 0, rotY = 0, rotZ = 0;
+		let frequency = 440;
+		let currentMode = 3; // 0=single, 1=dual, 2=object, 3=xy
+		
+		let distortion = 0, noiseAmount = 0, filterFreq = 2200;
+		
+		let phase = 0;
+		let time = 0;
+		
+		// Rotation
+		const rotateX = (x,y,z,a) => { const c=Math.cos(a),s=Math.sin(a); return [x, y*c-z*s, y*s+z*c]; };
+		const rotateY = (x,y,z,a) => { const c=Math.cos(a),s=Math.sin(a); return [x*c+z*s, y, -x*s+z*c]; };
+		const rotateZ = (x,y,z,a) => { const c=Math.cos(a),s=Math.sin(a); return [x*c-y*s, x*s+y*c, z]; };
+		
+		function applyRotation() {
+			if (!originalVertices.length) return;
+			vertices = [];
+			const rx = rotX * Math.PI/180, ry = rotY * Math.PI/180, rz = rotZ * Math.PI/180;
+			
+			for (let i = 0; i < originalVertices.length; i += 3) {
+				let [x,y,z] = [originalVertices[i], originalVertices[i+1], originalVertices[i+2]];
+				[x,y,z] = rotateX(x,y,z,rx);
+				[x,y,z] = rotateY(x,y,z,ry);
+				[x,y,z] = rotateZ(x,y,z,rz);
+				vertices.push(x, y, z);
+			}
+			generateWaveforms();
+		}
+		
+		function generateWaveforms() {
+			if (!vertices.length) return;
+			const maxVal = Math.max(...vertices.map(Math.abs)) || 1;
+			const scale = 0.9 / maxVal;
+			
+			waveform = []; waveform2 = []; waveformCombined = [];
+			
+			for (let i = 0; i < vertices.length; i += 3) {
+				const x = vertices[i] * scale;
+				const y = vertices[i+1] * scale;
+				const z = vertices[i+2] * scale;
+				waveform.push(x*0.75 + y*0.55 + z*0.35);
+				waveform2.push(y*0.85 + z*0.65 + x*0.45);
+			}
+			
+			for (let i = 0; i < waveform.length; i++) {
+				let val = waveform[i] * 0.65 + waveform2[i % waveform2.length] * 0.55;
+				waveformCombined.push(val);
+			}
+			
+			createAudioBuffer();
+			updateInfo();
+		}
+		
+		function createAudioBuffer() {
+			if (!audioContext || !waveform.length) return;
+			const sr = audioContext.sampleRate;
+			const duration = 10;
+			audioBuffer = audioContext.createBuffer(1, sr * duration, sr);
+			const data = audioBuffer.getChannelData(0);
+			const wf = currentMode === 2 || currentMode === 3 ? waveformCombined : waveform;
+			const samplesPerCycle = sr / frequency;
+			
+			for (let i = 0; i < data.length; i++) {
+				let idx = Math.floor((i / samplesPerCycle) * wf.length) % wf.length;
+				let sample = wf[idx] || 0;
+				if (distortion > 0) sample = Math.tanh(sample * (1 + distortion/25));
+				if (noiseAmount > 0) sample += (Math.random()-0.5) * (noiseAmount/120);
+				data[i] = Math.max(-1, Math.min(1, sample * 0.85));
+			}
+		}
+		
+		function playSound() {
+			if (!audioBuffer) return;
+			if (sourceNode) sourceNode.stop();
+			sourceNode = audioContext.createBufferSource();
+			sourceNode.buffer = audioBuffer;
+			sourceNode.loop = true;
+			
+			filterNode = audioContext.createBiquadFilter();
+			filterNode.type = 'lowpass';
+			filterNode.frequency.value = filterFreq;
+			
+			sourceNode.connect(filterNode).connect(gainNode);
+			sourceNode.start();
+			isPlaying = true;
+			document.getElementById('playBtn').style.display = 'none';
+			document.getElementById('pauseBtn').style.display = 'inline-block';
+		}
+		
+		function pauseSound() {
+			if (sourceNode) sourceNode.stop();
+			sourceNode = null;
+			isPlaying = false;
+			document.getElementById('playBtn').style.display = 'inline-block';
+			document.getElementById('pauseBtn').style.display = 'none';
+		}
+		
+		function initAudio() {
+			if (audioContext) return;
+			audioContext = new (window.AudioContext || window.webkitAudioContext)();
+			gainNode = audioContext.createGain();
+			gainNode.gain.value = 0.78;
+			gainNode.connect(audioContext.destination);
+		}
+		
+		function parseOBJ(text) {
+			originalVertices = [];
+			const lines = text.split('\n');
+			for (let line of lines) {
+				if (line.startsWith('v ')) {
+					const parts = line.trim().split(/\s+/);
+					const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+					if (!isNaN(x)) originalVertices.push(x, y, z);
+				}
+			}
+			resetRotation(false);
+			applyRotation();
+		}
+		
+		function updateInfo() {
+			const modes = ["Single", "Dual", "Object", "XY Shape"];
+			document.getElementById('waveInfo').innerHTML = `
+				Mode: <b>${modes[currentMode]}</b><br>
+				Vertices: ${Math.floor(originalVertices.length/3)}<br>
+				Freq: ${frequency} Hz<br>
+				Rotation: ${rotX.toFixed(0)}° ${rotY.toFixed(0)}° ${rotZ.toFixed(0)}°
+			`;
+		}
+		
+		function setMode(m) {
+			currentMode = m;
+			document.querySelectorAll('.mode-grid button').forEach((b,i) => b.classList.toggle('active', i===m));
+			createAudioBuffer();
+			if (isPlaying) playSound();
+		}
+		
+		function resetAll() {
+			rotX = rotY = rotZ = 0;
+			frequency = 440; distortion = noiseAmount = 0;
+			document.getElementById('rotX').value = document.getElementById('rotY').value = document.getElementById('rotZ').value = 0;
+			document.getElementById('freqSlider').value = 440;
+			document.getElementById('distortion').value = document.getElementById('noise').value = 0;
+			document.getElementById('filter').value = 2200;
+			applyRotation();
+		}
+		
+		function resetRotation(update=true) {
+			rotX=rotY=rotZ=0;
+			document.getElementById('rotX').value = document.getElementById('rotY').value = document.getElementById('rotZ').value = 0;
+			if (update) applyRotation();
+		}
+		
+		function switchTab(n) {
+			document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===n));
+			document.getElementById('panel0').style.display = n===0 ? 'block' : 'none';
+			document.getElementById('panel1').style.display = n===1 ? 'block' : 'none';
+		}
+		
+		// ================== DRAWING ==================
+		function drawScope() {
+			ctx.fillStyle = 'rgba(3,8,8,0.94)';
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+			
+			// Grid
+			ctx.strokeStyle = 'rgba(0,255,159,0.13)';
+			ctx.lineWidth = 1;
+			for (let x = 0; x < canvas.width; x += 50) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+			for (let y = 0; y < canvas.height; y += 50) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+			
+			if (!vertices.length) {
+				phase += 0.1;
+				requestAnimationFrame(drawScope);
+				return;
+			}
+			
+			const centerX = canvas.width / 2;
+			const centerY = canvas.height / 2;
+			const scale = Math.min(canvas.width, canvas.height) * 0.38;
+			
+			ctx.shadowBlur = 25;
+			ctx.shadowColor = '#00ff9f';
+			ctx.lineWidth = 2.2;
+			ctx.lineJoin = 'round';
+			
+			if (currentMode === 3) { 
+				// ================== XY SHAPE MODE ==================
+				ctx.strokeStyle = '#00ff9f';
+				ctx.beginPath();
+				
+				// Draw closed shape from projected vertices
+				const step = Math.max(1, Math.floor(vertices.length / 3 / 800));
+				let first = true;
+				
+				for (let i = 0; i < vertices.length; i += 3 * step) {
+					const x = vertices[i] * scale + centerX;
+					const y = vertices[i+1] * scale + centerY;  // Y-up in 3D → down on screen
+					
+					if (first) {
+						ctx.moveTo(x, y);
+						first = false;
+					} else {
+						ctx.lineTo(x, y);
+					}
+				}
+				ctx.closePath();
+				ctx.stroke();
+				
+				// Extra glow pass
+				ctx.shadowBlur = 55;
+				ctx.lineWidth = 1.1;
+				ctx.stroke();
+				
+			} else {
+				// Classic time-based traces (Single / Dual / Object)
+				const wf = (currentMode === 2) ? waveformCombined : waveform;
+				const len = Math.min(1250, wf.length);
+				
+				ctx.strokeStyle = '#00ff9f';
+				ctx.lineWidth = currentMode === 2 ? 4 : 3.5;
+				ctx.beginPath();
+				for (let i = 0; i < len; i++) {
+					const idx = Math.floor(i * (wf.length / len) + phase * 60) % wf.length;
+					const x = (i / len) * canvas.width;
+					const y = centerY - wf[idx] * (canvas.height * 0.37);
+					i === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+				}
+				ctx.stroke();
+				
+				if (currentMode === 1) {
+					ctx.strokeStyle = '#00ccff';
+					ctx.lineWidth = 2.6;
+					ctx.beginPath();
+					for (let i = 0; i < len; i++) {
+						const idx = Math.floor(i * (waveform2.length / len) + phase * 45) % waveform2.length;
+						const x = (i / len) * canvas.width;
+						const y = centerY - waveform2[idx] * (canvas.height * 0.36) + 28;
+						i === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+					}
+					ctx.stroke();
+				}
+			}
+			
+			phase += frequency / 6800;
+			time += 0.018;
+			animationFrame = requestAnimationFrame(drawScope);
+		}
+		
+		// Event Listeners
+		document.getElementById('fileInput').addEventListener('change', e => {
+			const file = e.target.files[0];
+			if (!file) return;
+			document.getElementById('status').textContent = 'LOADING...';
+			const reader = new FileReader();
+			reader.onload = ev => {
+				parseOBJ(ev.target.result);
+				document.getElementById('status').textContent = 'LOADED — XY ENABLED';
+				initAudio();
+				if (!isPlaying) playSound();
+			};
+			reader.readAsText(file);
+		});
+		
+		document.getElementById('playBtn').onclick = () => { initAudio(); playSound(); };
+		document.getElementById('pauseBtn').onclick = pauseSound;
+		
+		// Rotation
+		document.querySelectorAll('#rotX,#rotY,#rotZ').forEach(sl => {
+			sl.addEventListener('input', () => {
+				rotX = +document.getElementById('rotX').value;
+				rotY = +document.getElementById('rotY').value;
+				rotZ = +document.getElementById('rotZ').value;
+				document.getElementById('rxVal').textContent = rotX.toFixed(0);
+				document.getElementById('ryVal').textContent = rotY.toFixed(0);
+				document.getElementById('rzVal').textContent = rotZ.toFixed(0);
+				applyRotation();
+			});
+		});
+		
+		document.getElementById('freqSlider').addEventListener('input', e => {
+			frequency = +e.target.value;
+			document.getElementById('freqVal').textContent = frequency;
+			if (audioBuffer) createAudioBuffer();
+			if (isPlaying) playSound();
+		});
+		
+		// Effects
+		document.getElementById('distortion').addEventListener('input', e => { 
+			distortion = +e.target.value; 
+			document.getElementById('distVal').textContent = distortion;
+			if (audioBuffer) createAudioBuffer();
+			if (isPlaying) playSound();
+		});
+		document.getElementById('noise').addEventListener('input', e => { 
+			noiseAmount = +e.target.value; 
+			document.getElementById('noiseVal').textContent = noiseAmount;
+			if (audioBuffer) createAudioBuffer();
+			if (isPlaying) playSound();
+		});
+		document.getElementById('filter').addEventListener('input', e => { 
+			filterFreq = +e.target.value; 
+			document.getElementById('filterVal').textContent = filterFreq;
+			if (filterNode) filterNode.frequency.value = filterFreq;
+		});
+		
+		window.onload = () => {
+			initAudio();
+			drawScope();
+			
+			// Demo Torus-like object
+			setTimeout(() => {
+				if (!originalVertices.length) {
+					originalVertices = [];
+					for (let i = 0; i < 2800; i++) {
+						const a = i * 0.023;
+						const r = 2.2 + Math.sin(a*6)*0.6;
+						originalVertices.push(
+							r * Math.cos(a),
+							Math.sin(a*4)*1.8,
+							r * Math.sin(a)
+						);
+					}
+					applyRotation();
+				}
+			}, 250);
+		};
+	</script>
+</body>
+</html>
