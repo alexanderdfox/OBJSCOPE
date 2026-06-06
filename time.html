@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>TIME•DILATION SCOPE — 10 INDEPENDENT TRACES</title>
+	<style>
+		@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+		:root { --green: #00ff9f; --accent: #00ccff; }
+		
+		body {
+			background: #050505;
+			color: var(--green);
+			font-family: 'VT323', monospace;
+			margin: 0; padding: 0; height: 100vh;
+			display: flex; flex-direction: column; overflow: hidden;
+		}
+		
+		header {
+			background: #111;
+			border-bottom: 6px solid var(--green);
+			padding: 10px 20px;
+			display: flex; justify-content: space-between; align-items: center;
+			box-shadow: 0 0 25px rgba(0,255,159,0.6);
+		}
+		h1 { font-size: 2.5rem; letter-spacing: 6px; text-shadow: 0 0 15px var(--green); margin:0; }
+		
+		.controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+		button, select { 
+			background:#111; color:var(--green); border:2px solid var(--green); 
+			padding:8px 14px; font-family:inherit; cursor:pointer; font-size:1.1rem;
+		}
+		button:hover, select:hover { background:var(--green); color:#000; }
+		
+		.main { flex:1; display:flex; padding:15px; gap:15px; overflow:hidden; }
+		
+		.scope-container {
+			flex:1; background:#000; border:10px solid #1a1a1a; border-radius:12px;
+			position:relative; box-shadow:0 0 80px rgba(0,255,159,0.7);
+			overflow:hidden;
+		}
+		#oscilloscope { width:100%; height:100%; }
+		
+		.crt { position:absolute; inset:0; pointer-events:none;
+			background: repeating-linear-gradient(transparent 0px, transparent 3px, rgba(0,255,159,0.06) 3px, rgba(0,255,159,0.06) 6px);
+			box-shadow: inset 0 0 140px rgba(0,0,0,0.95);
+		}
+		
+		.sidebar {
+			width: 420px; background:#111; border:5px solid var(--green);
+			padding:15px; overflow-y:auto; display:flex; flex-direction:column; gap:12px;
+		}
+		
+		.trace-row {
+			display: grid;
+			grid-template-columns: 30px 1fr 80px 70px;
+			gap: 8px;
+			align-items: center;
+			background: #0a0a0a;
+			padding: 6px;
+			border: 1px solid #333;
+		}
+		
+		.status { color:#ffcc00; font-size:1.3rem; }
+	</style>
+</head>
+<body>
+	<header>
+		<h1>TIME•DILATION SCOPE</h1>
+		<div class="controls">
+			<button id="playBtn">▶ PLAY</button>
+			<button id="pauseBtn" style="display:none">⏸ PAUSE</button>
+			<button onclick="exportWAV()" class="export">💾 EXPORT WAV</button>
+			<button onclick="resetAll()">RESET ALL</button>
+		</div>
+		<div class="status" id="status">10 INDEPENDENT TRACES WITH EFFECTS</div>
+	</header>
+	
+	<div class="main">
+		<div class="scope-container">
+			<canvas id="oscilloscope" width="1400" height="720"></canvas>
+			<div class="crt"></div>
+		</div>
+		
+		<div class="sidebar">
+			<h2 style="margin:0">10 TRACES CONFIG</h2>
+			<div id="tracesContainer"></div>
+			
+			<h2>GLOBAL</h2>
+			<label>Master Frequency Hz: <span id="freqVal">440</span></label>
+			<input type="range" id="freqSlider" min="20" max="2500" value="440" step="1">
+			
+			<label>Global Speed <span id="globalSpeedVal">1.0</span>x</label>
+			<input type="range" id="globalSpeed" min="0.1" max="5" value="1" step="0.1">
+		</div>
+	</div>
+
+	<script>
+		const canvas = document.getElementById('oscilloscope');
+		const ctx = canvas.getContext('2d');
+		
+		let audioContext, gainNode, sourceNode, audioBuffer;
+		let isPlaying = false;
+		
+		let frequency = 440;
+		let globalSpeed = 1.0;
+		let phase = 0;
+		
+		// 10 independent traces
+		let traces = Array.from({length: 10}, (_, i) => ({
+			id: i,
+			waveType: i % 10,           // different starting waveform
+			amplitude: 0.7 + Math.random() * 0.6,
+			phaseOffset: i * 0.3,
+			dilation: 0.6 + Math.random() * 1.2,
+			distortion: i === 9 ? 25 : 0,
+			noise: i === 8 ? 15 : 0,
+			color: ['#00ff9f','#00ccff','#ff00aa','#ffff00','#88ff88','#ff8800','#aa00ff','#00ffff','#ff4488','#aaff00'][i]
+		}));
+		
+		function initAudio() {
+			if (audioContext) return;
+			audioContext = new (window.AudioContext || window.webkitAudioContext)();
+			gainNode = audioContext.createGain();
+			gainNode.gain.value = 0.72;
+			gainNode.connect(audioContext.destination);
+		}
+		
+		function getWaveSample(t, type) {
+			switch(type) {
+				case 0: return Math.sin(t * Math.PI * 2 * 8);
+				case 1: return (t * 12 % 1) * 2 - 1;
+				case 2: return Math.sin(t * Math.PI * 2 * 8) > 0 ? 1 : -1;
+				case 3: return Math.abs((t * 8 % 2) - 1) * 2 - 1;
+				case 4: return (t * 12 % 1) < 0.25 ? 1 : -1;
+				case 5: return Math.sin(t * Math.PI * 2 * 6) * Math.exp(-t * 10);
+				case 6: return Math.sin(t * Math.PI * 2 * 14 + Math.sin(t * Math.PI * 2 * 45) * 8);
+				case 7: return Math.sin(t*Math.PI*2*3)*0.6 + Math.sin(t*Math.PI*2*7)*0.35 + Math.sin(t*Math.PI*2*12)*0.2;
+				case 8: return (Math.random() - 0.5) * 1.8;
+				case 9: return Math.sin(t*Math.PI*2*5)*0.7 + Math.sin(t*Math.PI*2*13 + Math.sin(t*40)*5)*0.45 + Math.sin(t*Math.PI*2*27)*0.25;
+			}
+			return Math.sin(t * Math.PI * 2 * 8);
+		}
+		
+		function generateAudioBuffer() {
+			if (!audioContext) return;
+			const sr = audioContext.sampleRate;
+			const duration = 10;
+			audioBuffer = audioContext.createBuffer(1, sr * duration, sr);
+			const data = audioBuffer.getChannelData(0);
+			const samplesPerCycle = sr / frequency;
+			
+			for (let i = 0; i < data.length; i++) {
+				let mixed = 0;
+				const t = (i / samplesPerCycle);
+				
+				traces.forEach(trace => {
+					let sample = getWaveSample(t + trace.phaseOffset, trace.waveType);
+					sample *= trace.amplitude;
+					if (trace.distortion > 0) sample = Math.tanh(sample * (1 + trace.distortion/40));
+					if (trace.noise > 0) sample += (Math.random() - 0.5) * (trace.noise / 100);
+					mixed += sample * 0.12;
+				});
+				data[i] = Math.max(-0.95, Math.min(0.95, mixed));
+			}
+		}
+		
+		function playSound() {
+			if (!audioBuffer) return;
+			if (sourceNode) sourceNode.stop();
+			sourceNode = audioContext.createBufferSource();
+			sourceNode.buffer = audioBuffer;
+			sourceNode.loop = true;
+			sourceNode.connect(gainNode);
+			sourceNode.start();
+			isPlaying = true;
+			document.getElementById('playBtn').style.display = 'none';
+			document.getElementById('pauseBtn').style.display = 'inline-block';
+		}
+		
+		function pauseSound() {
+			if (sourceNode) sourceNode.stop();
+			sourceNode = null;
+			isPlaying = false;
+			document.getElementById('playBtn').style.display = 'inline-block';
+			document.getElementById('pauseBtn').style.display = 'none';
+		}
+		
+		function exportWAV() {
+			if (!audioBuffer) return alert("Play first");
+			const wav = audioBufferToWav(audioBuffer);
+			const blob = new Blob([wav], { type: 'audio/wav' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url; a.download = `10traces_${Date.now()}.wav`; a.click();
+			URL.revokeObjectURL(url);
+		}
+		
+		function audioBufferToWav(buffer) {
+			// Same as previous
+			const dataLength = buffer.length * 2;
+			const bufferLength = 44 + dataLength;
+			const arrayBuffer = new ArrayBuffer(bufferLength);
+			const view = new DataView(arrayBuffer);
+			
+			writeString(view, 0, 'RIFF');
+			view.setUint32(4, bufferLength - 8, true);
+			writeString(view, 8, 'WAVE');
+			writeString(view, 12, 'fmt ');
+			view.setUint32(16, 16, true);
+			view.setUint16(20, 1, true);
+			view.setUint16(22, 1, true);
+			view.setUint32(24, buffer.sampleRate, true);
+			view.setUint32(28, buffer.sampleRate * 2, true);
+			view.setUint16(32, 2, true);
+			view.setUint16(34, 16, true);
+			writeString(view, 36, 'data');
+			view.setUint32(40, dataLength, true);
+			
+			let offset = 44;
+			const data = buffer.getChannelData(0);
+			for (let i = 0; i < buffer.length; i++) {
+				const s = Math.max(-1, Math.min(1, data[i]));
+				view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+				offset += 2;
+			}
+			return arrayBuffer;
+		}
+		
+		function writeString(view, offset, string) {
+			for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+		}
+		
+		// ================== UI FOR 10 TRACES ==================
+		function createTraceControls() {
+			const container = document.getElementById('tracesContainer');
+			container.innerHTML = '';
+			
+			traces.forEach((trace, i) => {
+				const div = document.createElement('div');
+				div.className = 'trace-row';
+				div.innerHTML = `
+					<span style="color:${trace.color}; font-weight:bold;">${i+1}</span>
+					<select onchange="updateTrace(${i}, 'waveType', this.value)">
+					${Array.from({length:10}, (_,k) => `<option value="${k}" ${trace.waveType===k?'selected':''}>${k+1} ${['Sine','Saw','Square','Tri','Pulse','Decay','FM','Harmonic','Noise','Dream'][k]}</option>`).join('')}
+					</select>
+					<input type="range" min="0.2" max="1.8" step="0.05" value="${trace.amplitude}" 
+						   onchange="updateTrace(${i}, 'amplitude', this.value)">
+					<input type="range" min="0" max="2" step="0.1" value="${trace.dilation}" 
+						   onchange="updateTrace(${i}, 'dilation', this.value)">
+				`;
+				container.appendChild(div);
+			});
+		}
+		
+		window.updateTrace = function(index, prop, value) {
+			if (prop === 'amplitude' || prop === 'dilation') value = parseFloat(value);
+			if (prop === 'waveType') value = parseInt(value);
+			traces[index][prop] = value;
+			generateAudioBuffer();
+			if (isPlaying) playSound();
+		};
+		
+		// ================== DRAWING 10 TRACES ==================
+		function drawScope() {
+			ctx.fillStyle = 'rgba(3,8,8,0.93)';
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+			
+			// Grid
+			ctx.strokeStyle = 'rgba(0,255,159,0.13)';
+			ctx.lineWidth = 1;
+			for (let x = 0; x < canvas.width; x += 45) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+			for (let y = 0; y < canvas.height; y += 45) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+			
+			const centerY = canvas.height / 2;
+			const len = Math.min(1300, 2048);
+			
+			traces.forEach((trace, idx) => {
+				ctx.shadowBlur = 25 + idx * 3;
+				ctx.shadowColor = trace.color;
+				ctx.strokeStyle = trace.color;
+				ctx.lineWidth = idx === 9 ? 3.2 : 2.1;
+				
+				ctx.beginPath();
+				const verticalShift = (idx - 4.5) * 42;
+				
+				for (let i = 0; i < len; i++) {
+					const t = (i / len) * 12;
+					let sample = getWaveSample(t + trace.phaseOffset, trace.waveType);
+					sample *= trace.amplitude;
+					
+					const dilated = sample * trace.dilation;
+					
+					const x = (i / len) * canvas.width;
+					const y = centerY + verticalShift - dilated * (canvas.height * 0.19);
+					
+					i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+				}
+				ctx.stroke();
+			});
+			
+			phase += (frequency / 5200) * globalSpeed;
+			requestAnimationFrame(drawScope);
+		}
+		
+		function resetAll() {
+			frequency = 440;
+			globalSpeed = 1;
+			document.getElementById('freqSlider').value = 440;
+			document.getElementById('globalSpeed').value = 1;
+			generateAudioBuffer();
+		}
+		
+		// Event Listeners
+		document.getElementById('playBtn').onclick = () => { initAudio(); playSound(); };
+		document.getElementById('pauseBtn').onclick = pauseSound;
+		
+		document.getElementById('freqSlider').addEventListener('input', e => {
+			frequency = +e.target.value;
+			document.getElementById('freqVal').textContent = frequency;
+			generateAudioBuffer();
+			if (isPlaying) playSound();
+		});
+		
+		document.getElementById('globalSpeed').addEventListener('input', e => {
+			globalSpeed = +e.target.value;
+			document.getElementById('globalSpeedVal').textContent = globalSpeed.toFixed(1);
+		});
+		
+		window.onload = () => {
+			initAudio();
+			createTraceControls();
+			generateAudioBuffer();
+			drawScope();
+		};
+	</script>
+</body>
+</html>
