@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SVG•SCOPE — 10D Hyper-Object Vector Synthesizer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+        :root { 
+            --green: #00ff9f; 
+            --accent: #ff0055; 
+        }
+        
+        body {
+            background: #050505;
+            color: var(--green);
+            font-family: 'VT323', monospace;
+            margin: 0; padding: 0; height: 100vh;
+            display: flex; flex-direction: column; overflow: hidden;
+            touch-action: none; /* Prevents systemic rubber-banding on iOS */
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        header {
+            background: #111;
+            border-bottom: 4px solid var(--green);
+            padding: 8px 15px;
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 8px;
+            box-shadow: 0 0 20px rgba(0,255,159,0.5);
+            z-index: 10;
+        }
+        h1 { font-size: 2rem; letter-spacing: 2px; text-shadow: 0 0 10px var(--green); margin:0; }
+        
+        .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        button, .file-label { 
+            background:#111; color:var(--green); border:2px solid var(--green); 
+            padding:6px 12px; font-family:inherit; cursor:pointer; font-size:1rem;
+            display: inline-block; text-align: center;
+            -webkit-tap-highlight-color: transparent;
+        }
+        button:active, .file-label:active { background:var(--green); color:#000; }
+        button.export { background:#004400; border-color:#00cc66; }
+        button.export:active { background:#00cc66; color:#000; }
+        
+        .main { flex:1; display:flex; flex-direction: row; padding:10px; gap:10px; overflow:hidden; }
+        
+        /* Responsive layout adaptation for smaller iPhone displays */
+        @media (max-width: 768px) {
+            .main { flex-direction: column; }
+            .sidebar { width: 100% !important; height: 45% !important; }
+            .scope-container { height: 55% !important; }
+        }
+
+        .scope-container {
+            flex:1; background:#000; border:6px solid #1a1a1a; border-radius:8px;
+            position:relative; box-shadow:0 0 40px rgba(0,255,159,0.4);
+            overflow:hidden;
+        }
+        #oscilloscope { width:100%; height:100%; display: block; }
+        
+        .crt { position:absolute; inset:0; pointer-events:none;
+            background: repeating-linear-gradient(transparent 0px, transparent 3px, rgba(0,255,159,0.04) 3px, rgba(0,255,159,0.04) 6px);
+            box-shadow: inset 0 0 80px rgba(0,0,0,0.95);
+        }
+        
+        .sidebar {
+            width: 360px; background:#111; border:4px solid var(--green);
+            padding:12px; display:flex; flex-direction:column; gap:10px; overflow-y:auto;
+            -webkit-overflow-scrolling: touch; /* Kinetic scrolling for iOS panels */
+        }
+        
+        h2 { font-size: 1.2rem; margin: 4px 0; color: #fff; letter-spacing: 1px;}
+        label { display:block; margin:2px 0; color:#aaa; font-size: 1rem; }
+        input[type="range"] { width:100%; accent-color:var(--green); height: 20px; }
+        
+        .trace-selector-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 4px;
+            background: #151515;
+            padding: 4px;
+            border: 2px solid #333;
+        }
+        .trace-btn {
+            padding: 8px 0;
+            font-size: 1rem;
+            text-align: center;
+            background: #222;
+            color: #555;
+            border: 1px solid #444;
+        }
+        .trace-btn.loaded { color: #ffaa00; border-color: #ffaa00; }
+        .trace-btn.active-trace { background: var(--green) !important; color: #000 !important; border-color: var(--green) !important; font-weight: bold; }
+        
+        .rotation-controls-box {
+            background: #111;
+            border: 2px solid #222;
+            padding: 6px;
+            max-height: 160px;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .rot-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        .rot-row label { width: 90px; margin: 0; font-size: 0.9rem; }
+        .rot-row input[type="range"] { flex: 1; }
+        .rot-row input[type="checkbox"] { width: 22px; height: 22px; margin: 0; }
+
+        .status { color:#ffcc00; font-size:1.1rem; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>10D•HYPER•SCOPE</h1>
+        <div class="controls">
+            <label class="file-label" for="fileInput">LOAD SVG</label>
+            <input type="file" id="fileInput" accept=".svg" style="display:none">
+            <button id="playBtn">▶ PLAY OBJECT</button>
+            <button id="pauseBtn" style="display:none">⏸ PAUSE</button>
+            <button id="exportBtn" class="export">💾 WAV</button>
+            <button id="resetBtn">RESET</button>
+        </div>
+        <div class="status" id="status">TAP PLAY TO INITIALIZE MATRIX AUDIO</div>
+    </header>
+    
+    <div class="main">
+        <div class="scope-container" id="canvasContainer">
+            <canvas id="oscilloscope"></canvas>
+            <div class="crt"></div>
+        </div>
+        
+        <div class="sidebar">
+            <h2>10D INTERSECT MATRIX (CHOOSE DIMENSION)</h2>
+            <div class="trace-selector-grid" id="traceSelectorGrid"></div>
+            <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                <button id="clearLayerBtn" style="padding: 4px 8px; font-size:0.9rem;">CLEAR LAYER</button>
+                <button id="randomizeBtn" style="padding: 4px 8px; font-size:0.9rem; border-color: var(--accent); color: white;">RANDOMIZE 10D</button>
+            </div>
+
+            <h2>HYPERPLANE ROTATIONS (DRAG CANVAS TO WARP)</h2>
+            <div class="rotation-controls-box" id="rotationControls"></div>
+            
+            <label>Global Auto Speed <span id="autoSpeedVal">1.0</span>x</label>
+            <input type="range" id="autoSpeed" min="0" max="4" value="1" step="0.1">
+
+            <h2>SYNTHESIS CLOCK FREQUENCY</h2>
+            <label>Base Fundamental: <span id="freqVal">120</span> Hz</label>
+            <input type="range" id="freqSlider" min="20" max="800" value="120" step="1">
+            
+            <h2>GLOBAL RESONANCE EFFECTS</h2>
+            <label>Space Warp (Distortion) <span id="distVal">0</span>%</label>
+            <input type="range" id="distortion" min="0" max="80" value="0">
+            <label>Dimensional Noise <span id="noiseVal">0</span>%</label>
+            <input type="range" id="noise" min="0" max="40" value="0">
+            
+            <div id="waveInfo" style="background:#000;padding:8px;border:2px solid #333;font-size:0.95rem; min-height: 40px; color: #00ccff;">
+                Collapsing 10 Dimensions into Stereo Spatial Array...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('oscilloscope');
+        const ctx = canvas.getContext('2d');
+        
+        let audioContext, gainNode, sourceNode, audioBuffer;
+        let isPlaying = false;
+        let animationFrame;
+        
+        const NUM_DIMENSIONS = 10;
+        let activeDimIdx = 0;
+        let baseFrequency = 120;
+        let autoSpeed = 1.0;
+        let distortion = 0, noiseAmount = 0;
+        let audioUpdateTimeout = null;
+
+        let dimensions = Array.from({ length: NUM_DIMENSIONS }, () => ({
+            points: [], 
+            hasData: false
+        }));
+
+        let hyperplanes = [
+            { d1: 0, d2: 1, name: "X1-X2 Plane", angle: 0, auto: true, dir: 1 },
+            { d1: 1, d2: 2, name: "X2-X3 Plane", angle: 0, auto: false, dir: 1 },
+            { d1: 2, d2: 3, name: "X3-X4 Plane", angle: 0, auto: true, dir: -1 },
+            { d1: 3, d2: 4, name: "X4-X5 Plane", angle: 0, auto: false, dir: 1 },
+            { d1: 4, d2: 5, name: "X5-X6 Plane", angle: 0, auto: true, dir: 1 },
+            { d1: 5, d2: 6, name: "X6-X7 Plane", angle: 0, auto: false, dir: 1 },
+            { d1: 6, d2: 7, name: "X7-X8 Plane", angle: 0, auto: false, dir: -1 },
+            { d1: 7, d2: 8, name: "X8-X9 Plane", angle: 0, auto: true, dir: 1 },
+            { d1: 8, d2: 9, name: "X9-X10 Plane", angle: 0, auto: false, dir: 1 }
+        ];
+
+        let hyperVertices = []; 
+        let projected2D = [];   
+        let leftAudioWave = [];
+        let rightAudioWave = [];
+
+        // Track touch gestures across the oscilloscope canvas to shift planes directly
+        let lastTouchX = 0;
+        let lastTouchY = 0;
+        let isDragging = false;
+
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+
+        function initUI() {
+            const grid = document.getElementById('traceSelectorGrid');
+            grid.innerHTML = '';
+            for(let i=0; i<NUM_DIMENSIONS; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'trace-btn';
+                btn.id = `dim-btn-${i}`;
+                btn.textContent = `D${i+1}`;
+                // Use universal pointerdown for instantaneous touch feedback on iOS
+                btn.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    activeDimIdx = i; 
+                    updateUI(); 
+                });
+                grid.appendChild(btn);
+            }
+
+            const rotBox = document.getElementById('rotationControls');
+            rotBox.innerHTML = '';
+            hyperplanes.forEach((hp, index) => {
+                const row = document.createElement('div');
+                row.className = 'rot-row';
+                row.innerHTML = `
+                    <label>${hp.name}</label>
+                    <input type="range" id="hp-angle-${index}" min="-180" max="180" value="${hp.angle}">
+                    <input type="checkbox" id="hp-auto-${index}" ${hp.auto ? 'checked' : ''}>
+                `;
+                rotBox.appendChild(row);
+
+                row.querySelector('input[type="range"]').addEventListener('input', (e) => {
+                    hp.angle = +e.target.value;
+                    process10DCalculations();
+                });
+                row.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+                    hp.auto = e.target.checked;
+                });
+            });
+
+            updateUI();
+        }
+
+        function updateUI() {
+            for(let i=0; i<NUM_DIMENSIONS; i++) {
+                const btn = document.getElementById(`dim-btn-${i}`);
+                if(btn) {
+                    btn.classList.toggle('active-trace', i === activeDimIdx);
+                    btn.classList.toggle('loaded', dimensions[i].hasData);
+                }
+            }
+            document.getElementById('status').textContent = `Editing Track Layer: D${activeDimIdx + 1}`;
+            updateInfoPanel();
+        }
+
+        function updateInfoPanel() {
+            document.getElementById('waveInfo').innerHTML = `
+                Vertices: <b>${hyperVertices.length}</b> | Fundamental: <b>${baseFrequency} Hz</b><br>
+                Model: Orthographic Tensor Map
+            `;
+        }
+
+        function generateSyntheticMatrixData(dimIdx, waveType) {
+            let pts = [];
+            const samples = 180; // Optimized sample size keeps complex math fast on mobile chips
+            for(let i=0; i<samples; i++) {
+                let rad = (i * Math.PI) / 90;
+                let x = 0, y = 0;
+                if(waveType === 'circle') {
+                    x = Math.sin(rad * (1 + dimIdx * 0.3)) * 120;
+                    y = Math.cos(rad * (1 + dimIdx * 0.2)) * 120;
+                } else {
+                    x = (i - 90) * 2;
+                    y = Math.sin(rad * (2 + dimIdx * 0.5)) * 100;
+                }
+                pts.push([x, y]);
+            }
+            dimensions[dimIdx].points = pts;
+            dimensions[dimIdx].hasData = true;
+        }
+
+        function randomize10D() {
+            for(let i=0; i<NUM_DIMENSIONS; i++) {
+                generateSyntheticMatrixData(i, Math.random() > 0.5 ? 'circle' : 'wave');
+            }
+            hyperplanes.forEach(hp => {
+                hp.angle = Math.floor(Math.random() * 360) - 180;
+            });
+            initUI();
+            compileHyperVertices();
+        }
+
+        function compileHyperVertices() {
+            let maxLen = 0;
+            for(let i=0; i<NUM_DIMENSIONS; i++) {
+                if(!dimensions[i].hasData) {
+                    generateSyntheticMatrixData(i, i % 2 === 0 ? 'circle' : 'wave');
+                }
+                maxLen = Math.max(maxLen, dimensions[i].points.length);
+            }
+
+            hyperVertices = [];
+            for (let i = 0; i < maxLen; i++) {
+                let vertex = new Float32Array(NUM_DIMENSIONS);
+                for (let d = 0; d < NUM_DIMENSIONS; d++) {
+                    let pts = dimensions[d].points;
+                    let p = pts[i % pts.length];
+                    vertex[d] = (p[0] + p[1]) * 0.5;
+                }
+                hyperVertices.push(vertex);
+            }
+            process10DCalculations();
+        }
+
+        function process10DCalculations() {
+            if (hyperVertices.length === 0) return;
+
+            let transformed = hyperVertices.map(v => new Float32Array(v));
+
+            hyperplanes.forEach(hp => {
+                if (hp.angle === 0) return;
+                let rad = (hp.angle * Math.PI) / 180;
+                let cos = Math.cos(rad);
+                let sin = Math.sin(rad);
+                let d1 = hp.d1;
+                let d2 = hp.d2;
+
+                for (let i = 0; i < transformed.length; i++) {
+                    let v = transformed[i];
+                    let a = v[d1];
+                    let b = v[d2];
+                    v[d1] = a * cos - b * sin;
+                    v[d2] = a * sin + b * cos;
+                }
+            });
+
+            projected2D = [];
+            leftAudioWave = [];
+            rightAudioWave = [];
+
+            for (let i = 0; i < transformed.length; i++) {
+                let v = transformed[i];
+                
+                let x2d = v[0] * 0.4 + v[2] * 0.3 + v[4] * 0.2 + v[6] * 0.1;
+                let y2d = v[1] * 0.4 + v[3] * 0.3 + v[5] * 0.2 + v[7] * 0.1;
+                projected2D.push([x2d, y2d]);
+
+                let leftChannelSignal = v[0] * 0.3 + v[2] * 0.25 + v[4] * 0.2 + v[6] * 0.15 + v[8] * 0.1;
+                let rightChannelSignal = v[1] * 0.3 + v[3] * 0.25 + v[5] * 0.2 + v[7] * 0.15 + v[9] * 0.1;
+
+                leftAudioWave.push(leftChannelSignal);
+                rightAudioWave.push(rightChannelSignal);
+            }
+
+            normalizeAudioVectors();
+            createAudioBuffer();
+        }
+
+        function normalizeAudioVectors() {
+            let maxL = Math.max(...leftAudioWave.map(Math.abs)) || 1;
+            let maxR = Math.max(...rightAudioWave.map(Math.abs)) || 1;
+            let overallMax = Math.max(maxL, maxR);
+            
+            for(let i=0; i<leftAudioWave.length; i++) {
+                leftAudioWave[i] /= overallMax;
+                rightAudioWave[i] /= overallMax;
+            }
+        }
+
+        function createAudioBuffer() {
+            if (!audioContext || !leftAudioWave.length) return;
+            const sr = audioContext.sampleRate;
+            const duration = 2; // Short buffer generation cuts down computational latency on mobile browsers
+            
+            audioBuffer = audioContext.createBuffer(2, sr * duration, sr);
+            const dataL = audioBuffer.getChannelData(0);
+            const dataR = audioBuffer.getChannelData(1);
+            
+            const samplesPerCycle = sr / baseFrequency;
+            
+            for (let i = 0; i < dataL.length; i++) {
+                let idx = Math.floor((i / samplesPerCycle) * leftAudioWave.length) % leftAudioWave.length;
+                
+                let sampleL = leftAudioWave[idx] || 0;
+                let sampleR = rightAudioWave[idx] || 0;
+                
+                if (distortion > 0) {
+                    sampleL = Math.tanh(sampleL * (1 + distortion/20));
+                    sampleR = Math.tanh(sampleR * (1 + distortion/20));
+                }
+                if (noiseAmount > 0) {
+                    let n = (Math.random() - 0.5) * (noiseAmount / 100);
+                    sampleL += n;
+                    sampleR += n;
+                }
+                
+                dataL[i] = Math.max(-1, Math.min(1, sampleL * 0.75));
+                dataR[i] = Math.max(-1, Math.min(1, sampleR * 0.75));
+            }
+        }
+
+        // Real-Time Safe Audio contextual startup for iOS Safari
+        function initAudio() {
+            if (audioContext) {
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+                return;
+            }
+            // Add iOS specific vendor prefix support fallback explicitly
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            audioContext = new AudioContextClass();
+            gainNode = audioContext.createGain();
+            gainNode.gain.value = 0.8;
+            gainNode.connect(audioContext.destination);
+            createAudioBuffer();
+        }
+
+        function playSound() {
+            initAudio();
+            if (!audioBuffer) return;
+            if (sourceNode) sourceNode.stop();
+            
+            sourceNode = audioContext.createBufferSource();
+            sourceNode.buffer = audioBuffer;
+            sourceNode.loop = true;
+            sourceNode.connect(gainNode);
+            sourceNode.start();
+            isPlaying = true;
+            document.getElementById('playBtn').style.display = 'none';
+            document.getElementById('pauseBtn').style.display = 'inline-block';
+        }
+        
+        function pauseSound() {
+            if (sourceNode) {
+                sourceNode.stop();
+                sourceNode = null;
+            }
+            isPlaying = false;
+            document.getElementById('playBtn').style.display = 'inline-block';
+            document.getElementById('pauseBtn').style.display = 'none';
+        }
+
+        function parseSVG(text) {
+            let parsedPoints = [];
+            const parser = new DOMParser();
+            const svgDoc = parser.parseFromString(text, "image/svg+xml");
+            
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            const paths = svgDoc.querySelectorAll('path, polygon, polyline, line, circle, rect, ellipse');
+            
+            paths.forEach(shape => {
+                if (shape.tagName === 'path') {
+                    const len = shape.getTotalLength() || 400;
+                    const samples = 120;
+                    for (let i = 0; i <= samples; i++) {
+                        const p = shape.getPointAtLength(i * len / samples);
+                        parsedPoints.push([p.x, p.y]);
+                        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+                        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+                    }
+                } else if (shape.tagName === 'polygon' || shape.tagName === 'polyline') {
+                    const ptsStr = shape.getAttribute('points') || '';
+                    const nums = ptsStr.trim().split(/[\s,]+/).map(Number);
+                    for (let i = 0; i < nums.length; i += 2) {
+                        if (!isNaN(nums[i])) {
+                            parsedPoints.push([nums[i], nums[i+1]]);
+                            minX = Math.min(minX, nums[i]); maxX = Math.max(maxX, nums[i]);
+                            minY = Math.min(minY, nums[i+1]); maxY = Math.max(maxY, nums[i+1]);
+                        }
+                    }
+                }
+            });
+            
+            if (parsedPoints.length < 5) return;
+            
+            const width = maxX - minX || 500;
+            const height = maxY - minY || 500;
+            const scaleFactor = 240 / Math.max(width, height);
+            
+            dimensions[activeDimIdx].points = parsedPoints.map(([x, y]) => [
+                (x - (minX + maxX)/2) * scaleFactor,
+                (y - (minY + maxY)/2) * scaleFactor
+            ]);
+            
+            dimensions[activeDimIdx].hasData = true;
+            updateUI();
+            compileHyperVertices();
+        }
+
+        function updateAudioThrottled() {
+            if (audioUpdateTimeout) clearTimeout(audioUpdateTimeout);
+            audioUpdateTimeout = setTimeout(() => {
+                createAudioBuffer();
+                if (isPlaying) playSound();
+            }, 60);
+        }
+
+        function drawScope() {
+            const logicalWidth = canvas.width / window.devicePixelRatio;
+            const logicalHeight = canvas.height / window.devicePixelRatio;
+
+            ctx.fillStyle = 'rgba(3,8,8,0.92)';
+            ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+            
+            ctx.strokeStyle = 'rgba(0,255,159,0.06)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < logicalWidth; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,logicalHeight); ctx.stroke(); }
+            for (let y = 0; y < logicalHeight; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(logicalWidth,y); ctx.stroke(); }
+            
+            const centerX = logicalWidth / 2;
+            const centerY = logicalHeight / 2;
+            
+            if (projected2D.length > 0) {
+                ctx.shadowBlur = window.devicePixelRatio > 1 ? 8 : 15; // Dynamic downscaling protects frame pacing on mobile GPUs
+                ctx.shadowColor = '#00ff9f';
+                ctx.strokeStyle = '#00ff9f';
+                ctx.lineWidth = 2;
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                
+                let first = true;
+                for (let i = 0; i < projected2D.length; i++) {
+                    const x = projected2D[i][0] * 1.2 + centerX;
+                    const y = projected2D[i][1] * 1.2 + centerY;
+                    if (first) { ctx.moveTo(x, y); first = false; }
+                    else ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.stroke();
+                ctx.shadowBlur = 0; // Clear immediately to keep rendering lightweight
+            }
+
+            let rotationHappened = false;
+            hyperplanes.forEach((hp, idx) => {
+                if (hp.auto && !isDragging) {
+                    const delta = 0.6 * autoSpeed * hp.dir;
+                    hp.angle = (hp.angle + delta + 180) % 360 - 180;
+                    rotationHappened = true;
+                    
+                    const slider = document.getElementById(`hp-angle-${idx}`);
+                    if(slider) slider.value = hp.angle;
+                }
+            });
+
+            if (rotationHappened) {
+                process10DCalculations();
+                updateAudioThrottled();
+            }
+            
+            animationFrame = requestAnimationFrame(drawScope);
+        }
+
+        function exportWAV() {
+            if (!audioBuffer) return;
+            const numChannels = 2; 
+            const sampleRate = audioContext.sampleRate;
+            const dataLength = audioBuffer.length * numChannels * 2;
+            const bufferLength = 44 + dataLength;
+            const arrayBuffer = new ArrayBuffer(bufferLength);
+            const view = new DataView(arrayBuffer);
+            
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, bufferLength - 8, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * numChannels * 2, true);
+            view.setUint16(32, numChannels * 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataLength, true);
+            
+            let offset = 44;
+            const dataL = audioBuffer.getChannelData(0);
+            const dataR = audioBuffer.getChannelData(1);
+            for (let i = 0; i < audioBuffer.length; i++) {
+                let sL = Math.max(-1, Math.min(1, dataL[i]));
+                view.setInt16(offset, sL < 0 ? sL * 0x8000 : sL * 0x7FFF, true);
+                offset += 2;
+                let sR = Math.max(-1, Math.min(1, dataR[i]));
+                view.setInt16(offset, sR < 0 ? sR * 0x8000 : sR * 0x7FFF, true);
+                offset += 2;
+            }
+            
+            const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = `hyper_object_10d.wav`; a.click();
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+        }
+
+        // Setup touch events explicitly to interact directly on screen surfaces
+        function setupTouchInteraction() {
+            canvas.addEventListener('pointerdown', (e) => {
+                initAudio(); // Satisfies iOS user gesture audio policies instantaneously
+                isDragging = true;
+                lastTouchX = e.clientX;
+                lastTouchY = e.clientY;
+                canvas.setPointerCapture(e.pointerId);
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+                const deltaX = e.clientX - lastTouchX;
+                const deltaY = e.clientY - lastTouchY;
+                
+                // Directly manipulate primary hyperplanes using spatial touch drag coordinates
+                hyperplanes[0].angle = ((hyperplanes[0].angle + deltaX * 0.5 + 180) % 360) - 180;
+                hyperplanes[1].angle = ((hyperplanes[1].angle + deltaY * 0.5 + 180) % 360) - 180;
+                
+                document.getElementById('hp-angle-0').value = hyperplanes[0].angle;
+                document.getElementById('hp-angle-1').value = hyperplanes[1].angle;
+                
+                lastTouchX = e.clientX;
+                lastTouchY = e.clientY;
+                
+                process10DCalculations();
+                updateAudioThrottled();
+            });
+
+            const stopDrag = (e) => {
+                if (isDragging) {
+                    isDragging = false;
+                    try { canvas.releasePointerCapture(e.pointerId); } catch(err) {}
+                }
+            };
+            canvas.addEventListener('pointerup', stopDrag);
+            canvas.addEventListener('pointercancel', stopDrag);
+        }
+
+        // Global Event Attachments Optimized for Cross-Platform compatibility
+        document.getElementById('fileInput').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = ev => parseSVG(ev.target.result);
+            reader.readAsText(file);
+        });
+        
+        document.getElementById('playBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); playSound(); });
+        document.getElementById('pauseBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); pauseSound(); });
+        document.getElementById('exportBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); exportWAV(); });
+        
+        document.getElementById('clearLayerBtn').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            dimensions[activeDimIdx].points = [];
+            dimensions[activeDimIdx].hasData = false;
+            updateUI();
+            compileHyperVertices();
+        });
+
+        document.getElementById('randomizeBtn').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            randomize10D();
+        });
+
+        document.getElementById('resetBtn').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            hyperplanes.forEach(hp => { hp.angle = 0; });
+            distortion = noiseAmount = 0; baseFrequency = 120; autoSpeed = 1.0;
+            document.getElementById('distortion').value = 0;
+            document.getElementById('noise').value = 0;
+            document.getElementById('freqSlider').value = 120;
+            document.getElementById('autoSpeed').value = 1.0;
+            document.getElementById('freqVal').textContent = 120;
+            document.getElementById('distVal').textContent = 0;
+            document.getElementById('noiseVal').textContent = 0;
+            process10DCalculations();
+            initUI();
+        });
+        
+        document.getElementById('freqSlider').addEventListener('input', e => {
+            baseFrequency = +e.target.value;
+            document.getElementById('freqVal').textContent = baseFrequency;
+            updateAudioThrottled();
+        });
+        document.getElementById('autoSpeed').addEventListener('input', e => {
+            autoSpeed = +e.target.value;
+            document.getElementById('autoSpeedVal').textContent = autoSpeed.toFixed(1);
+        });
+        document.getElementById('distortion').addEventListener('input', e => { 
+            distortion = +e.target.value; document.getElementById('distVal').textContent = distortion;
+            updateAudioThrottled();
+        });
+        document.getElementById('noise').addEventListener('input', e => { 
+            noiseAmount = +e.target.value; document.getElementById('noiseVal').textContent = noiseAmount;
+            updateAudioThrottled();
+        });
+
+        window.addEventListener('resize', resizeCanvas);
+
+        window.onload = () => {
+            resizeCanvas();
+            initUI();
+            setupTouchInteraction();
+            compileHyperVertices();
+            drawScope();
+        };
+    </script>
+</body>
+</html>
